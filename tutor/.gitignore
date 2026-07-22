@@ -1,5 +1,6 @@
 state.json
 weekly.log
+quarterly.log
 snapshots/
 reports/
 __pycache__/

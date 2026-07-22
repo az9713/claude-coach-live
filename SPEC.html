@@ -63,7 +63,7 @@
 <body>
 
 <h1>Living Claude Tutor — Specification</h1>
-<p class="subtitle">A self-extending habit coach for Claude Code usage · v0.1 · 2026-07-21 · <strong>status: stages 1–3 implemented 2026-07-21</strong> (P2 statusline &amp; P8 blind-spot pass remain set aside; live system in <code>~/.claude/tutor/</code>, git-tracked)</p>
+<p class="subtitle">A self-extending habit coach for Claude Code usage · v0.1 · 2026-07-21 · <strong>status: stages 1–3 implemented 2026-07-21</strong> (P2 &amp; P8 implemented 2026-07-22; live system in <code>~/.claude/tutor/</code>, git-tracked)</p>
 
 <h2>1. Background &amp; goal</h2>
 <p>An audit of 458 main sessions (plus 886 subagent/workflow transcripts, ~1&nbsp;GB) found that a handful of usage habits dominate cost: 12 sessions account for ~49% of 13.25&nbsp;billion lifetime cache-read tokens. The measured habits:</p>
@@ -124,7 +124,7 @@
 </div>
 
 <div class="piece">
-<h3>P2 — Statusline ambient cue (ambient loop)<span class="tag aside">set aside</span></h3>
+<h3>P2 — Statusline ambient cue (ambient loop)<span class="tag build">built 2026-07-22</span></h3>
 <p class="label">Motivation</p>
 <p>"Make it obvious" — a permanently visible context meter and habit grade (🟢/🟡/🔴) means drift is seen <em>before</em> the P1 nudge fires, with zero interruption. Set aside from the first build because P1 delivers most of the value and the statusline is pure polish — but specified here so it isn't forgotten.</p>
 <p class="label">Implementation</p>
@@ -209,7 +209,7 @@
 </div>
 
 <div class="piece">
-<h3>P8 — Quarterly blind-spot pass<span class="tag aside">set aside</span></h3>
+<h3>P8 — Quarterly blind-spot pass<span class="tag build">built 2026-07-22</span></h3>
 <p class="label">Motivation</p>
 <p>The weekly loop normalizes its own blind spots — whatever it consistently overlooks becomes invisible to it. A quarterly third-party audit of the tutor itself, using the already-installed <code>blind-spot-pass</code> skill with <code>TUTOR-MODEL.md</code> as input ("my Claude Code usage — what does this model of me not see?"), resets the frame. Set aside: valuable, but only after the weekly loop has a quarter of history to critique.</p>
 <p class="label">Implementation</p>
@@ -260,7 +260,7 @@
   <tr><td>1</td><td>P1 (+ P9 quick fixes)</td><td>Real-time catch of the two ~50%-of-spend habits</td><td><strong>implemented 2026-07-21</strong> — hook tested (regex, cooldown, 527k-ctx escalation); security-guidance gated (ENABLE_STOP_REVIEW=0, Sonnet); allowlist added; standing rules in 3 project CLAUDE.md files</td></tr>
   <tr><td>2</td><td>P3 + P4 + P5</td><td>Trend reward loop + new-habit discovery + absence detection</td><td><strong>implemented 2026-07-21</strong> — tutor_weekly.py; schtasks "ClaudeTutorWeekly" Sun 18:00; first snapshot 2026-W30</td></tr>
   <tr><td>3</td><td>P6 + P7</td><td>Unknown-unknown discovery + self-extension ("living")</td><td><strong>implemented 2026-07-21</strong> — Sensor C sampler + meta step in weekly engine; TUTOR-MODEL.md seeded; proposals gate via pending-proposals.json</td></tr>
-  <tr><td>later</td><td>P2, P8</td><td>Ambient cue; quarterly external audit of the tutor</td><td>set aside, specified</td></tr>
+  <tr><td>later</td><td>P2, P8</td><td>Ambient cue; quarterly external audit of the tutor</td><td>implemented 2026-07-22</td></tr>
 </table>
 </div>
 <p class="small">Each stage works standalone. Open calibration decisions (deferred to build time): god-session nudge thresholds (proposed 150k / 300k), nudge cooldowns, weekly sample size for Sensor C, and which cron carries the weekly job.</p>
