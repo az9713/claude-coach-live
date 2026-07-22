@@ -12,16 +12,17 @@ from tutor_hook import context_estimate, load  # noqa: E402
 
 
 def grade(ctx):
-    """Traffic-light from active context_threshold rules; defaults 150k/300k."""
+    """Escalation marker from active context_threshold rules; defaults 150k/300k.
+    ASCII on purpose - reads identically in color, monochrome, and logs."""
     ts = sorted(r["threshold"] for r in load(os.path.join(TUTOR, "rules.json"), {})
                 .get("rules", [])
                 if r.get("kind") == "context_threshold" and r.get("status") == "active")
     ts = ts or [150000, 300000]
     if ctx > ts[-1]:
-        return "\U0001f534"  # red: god-session territory
+        return " !!"  # god-session territory: handoff + /clear now
     if ctx > ts[0]:
-        return "\U0001f7e1"  # yellow: nudge threshold crossed
-    return "\U0001f7e2"
+        return " !"   # nudge threshold crossed: plan a handoff
+    return ""
 
 
 def main():
@@ -33,12 +34,12 @@ def main():
     fires = sum(load(os.path.join(TUTOR, "state.json"), {})
                 .get("counters", {}).get(week, {}).values())
     if brief:
-        print("%s nudges:%d" % (grade(ctx), fires))
+        print("~%dk%s nudges:%d" % (round(ctx / 1000), grade(ctx), fires))
         return
     model = ((data.get("model") or {}).get("display_name") or "").strip()
     cost = (data.get("cost") or {}).get("total_cost_usd")
 
-    parts = ["ctx ~%dk %s" % (round(ctx / 1000), grade(ctx))]
+    parts = ["ctx ~%dk%s" % (round(ctx / 1000), grade(ctx))]
     if model:
         parts.append(model)
     if isinstance(cost, (int, float)) and cost > 0:

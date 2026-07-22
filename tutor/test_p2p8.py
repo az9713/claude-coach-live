@@ -26,14 +26,14 @@ try:
         "model": {"display_name": "TestModel"},
         "cost": {"total_cost_usd": 1.5}}))
     assert code == 0, "statusline must always exit 0"
-    assert "ctx ~201k" in out, "context estimate wrong: %r" % out
-    assert "\U0001f7e1" in out, "201k should grade yellow (>150k, <300k): %r" % out
+    assert "ctx ~201k !" in out and "!!" not in out, \
+        "201k should mark single ! (>150k, <300k): %r" % out
     assert "TestModel" in out and "$1.50" in out and "nudges wk:" in out, out
 
     # --brief mode for embedding in an existing statusline script
     code, out = run("statusline.py", json.dumps({"transcript_path": fake_transcript}),
                     args=("--brief",))
-    assert code == 0 and "\U0001f7e1" in out and "nudges:" in out, out
+    assert code == 0 and "~201k !" in out and "nudges:" in out, out
 
     # garbage stdin must not crash it (fail-safe contract)
     code, out = run("statusline.py", "not json at all")

@@ -90,26 +90,32 @@ tutor=$(echo "$input" | python "$HOME/.claude/tutor/statusline.py" --brief 2>/de
 Example (embed mode, appended to an existing statusline):
 
 ```
-| Fable 5 | effort:high | fable_5_maxxing_5 | ctx 15% | 5h 1% | 7d 89% | 🟢 nudges:11 |
+| Fable 5 | effort:high | fable_5_maxxing_5 | ctx 15% | 5h 1% | 7d 89% | ~89k nudges:11 |
 ```
 
 Everything before the last segment is the pre-existing statusline (model, reasoning
 effort, working dir, Claude Code's own context-window %, 5-hour and 7-day rate-limit
-usage). The tutor contributes only the last segment:
+usage). The tutor contributes only the last segment, which has two parts:
 
-| segment | meaning | source |
+| part | meaning | source |
 |---|---|---|
-| 🟢 / 🟡 / 🔴 | **this session's** estimated context vs the tutor's thresholds: 🟢 below 150k tokens; 🟡 past 150k (the nudge threshold — plan a handoff at the next natural pause); 🔴 past 300k (god-session territory — run handoff-after-clear, then `/clear`) | last `usage` block in the session transcript (input + cache_read + cache_creation), same estimate the P1 hook uses; thresholds read live from `rules.json`, so an approved threshold change re-grades the meter automatically |
+| `~89k` / `~158k !` / `~310k !!` | **this session's** estimated context, in tokens, with an ASCII escalation marker: no marker below 150k; ` !` past 150k (the nudge threshold — plan a handoff at the next natural pause); ` !!` past 300k (god-session territory — run handoff-after-clear, then `/clear`) | last `usage` block in the session transcript (input + cache_read + cache_creation), same estimate the P1 hook uses; thresholds read live from `rules.json`, so an approved threshold change re-marks the meter automatically |
 | `nudges:11` | **all sessions, this ISO week**: total P1 rule fires (babysit prompts, god-session warnings, fat pastes, orphaned task lists) | `state.json` weekly counters |
 
-So `🟢 nudges:11` reads: *"this session is fine, but the tutor has had to speak up 11
-times across all sessions this week."* A high count with a green light means the waste
-is happening in *other* sessions — the weekly report card breaks down which rules fired.
-Note the emoji and Claude Code's own `ctx %` can disagree slightly: they use different
-accounting (the tutor counts raw transcript usage; Claude Code reports usable-window
-percentage after reserved buffers). Trust either — they converge where it matters.
+The marker is deliberately ASCII, not a colored dot — it reads identically in a
+color terminal, a monochrome one, and a piped log. The raw `~Nk` number carries the
+information a traffic-light colour only hinted at: you see *how far* into the session
+you are, not just which band.
 
-Standalone mode renders the full form instead: `ctx ~201k 🟡 · Opus 4.8 · $2.31 · nudges wk: 3`.
+So `~89k nudges:11` reads: *"this session is fine (89k, well under threshold), but the
+tutor has had to speak up 11 times across all sessions this week."* A high count with an
+unmarked, low `~Nk` means the waste is happening in *other* sessions — the weekly report
+card breaks down which rules fired. Note the tutor's `~Nk` and Claude Code's own `ctx %`
+can disagree slightly: they use different accounting (the tutor counts raw transcript
+usage; Claude Code reports usable-window percentage after reserved buffers). Trust
+either — they converge where it matters.
+
+Standalone mode renders the full form instead: `ctx ~201k ! · Opus 4.8 · $2.31 · nudges wk: 3`.
 
 5. (P8) Register the quarterly blind-spot pass (1st of Jan/Apr/Jul/Oct, 18:30):
 
