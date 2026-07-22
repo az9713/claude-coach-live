@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Living Claude Tutor — Specification</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #666; --line: #e2e2e2;
+    --accent: #b45309; --accent-bg: #fff7ed;
+    --ok: #15803d; --ok-bg: #f0fdf4;
+    --warn: #b91c1c; --warn-bg: #fef2f2;
+    --code-bg: #f6f6f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d; --fg: #e6e6e6; --muted: #9a9a9a; --line: #33363d;
+      --accent: #f59e0b; --accent-bg: #2a2115;
+      --ok: #4ade80; --ok-bg: #14231a;
+      --warn: #f87171; --warn-bg: #2a1717;
+      --code-bg: #22252c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto; max-width: 60rem; padding: 2rem 1.25rem 5rem;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.6 Georgia, 'Times New Roman', serif;
+  }
+  h1, h2, h3 { font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.25; }
+  h1 { font-size: 1.9rem; margin-bottom: .25rem; }
+  h2 { font-size: 1.35rem; margin-top: 3rem; border-bottom: 2px solid var(--line); padding-bottom: .35rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.8rem; }
+  .subtitle { color: var(--muted); font-family: 'Segoe UI', system-ui, sans-serif; margin-top: 0; }
+  code, pre {
+    font-family: Consolas, 'Cascadia Code', monospace; font-size: .85em;
+    background: var(--code-bg); border-radius: 4px;
+  }
+  code { padding: .1em .35em; }
+  pre { padding: .8rem 1rem; overflow-x: auto; line-height: 1.45; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  th, td { border: 1px solid var(--line); padding: .45rem .6rem; text-align: left; vertical-align: top; }
+  th { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--code-bg); }
+  .tablewrap { overflow-x: auto; }
+  .tag {
+    display: inline-block; font: 700 .7rem/1 'Segoe UI', system-ui, sans-serif;
+    padding: .25em .6em; border-radius: 99px; letter-spacing: .04em; text-transform: uppercase;
+    vertical-align: middle; margin-left: .5rem;
+  }
+  .tag.build { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok); }
+  .tag.aside { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent); }
+  .tag.once { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn); }
+  .piece { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.4rem; margin: 1.4rem 0; }
+  .piece h3 { margin-top: .2rem; }
+  .label { font-family: 'Segoe UI', system-ui, sans-serif; font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 1rem 0 .2rem; }
+  .callout { background: var(--accent-bg); border-left: 4px solid var(--accent); padding: .8rem 1.1rem; border-radius: 0 6px 6px 0; margin: 1.2rem 0; }
+  .cost { font-family: 'Segoe UI', system-ui, sans-serif; font-size: .9rem; }
+  ul { padding-left: 1.3rem; }
+  li { margin: .25rem 0; }
+  .small { font-size: .85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Living Claude Tutor — Specification</h1>
+<p class="subtitle">A self-extending habit coach for Claude Code usage · v0.1 · 2026-07-21 · <strong>status: stages 1–3 implemented 2026-07-21</strong> (P2 statusline &amp; P8 blind-spot pass remain set aside; live system in <code>~/.claude/tutor/</code>, git-tracked)</p>
+
+<h2>1. Background &amp; goal</h2>
+<p>An audit of 458 main sessions (plus 886 subagent/workflow transcripts, ~1&nbsp;GB) found that a handful of usage habits dominate cost: 12 sessions account for ~49% of 13.25&nbsp;billion lifetime cache-read tokens. The measured habits:</p>
+<ul>
+  <li><strong>God sessions</strong> — one giant context used as project memory (132 sessions peaked &gt;150k tokens; worst: 1.29B cache-read tokens over 26 days).</li>
+  <li><strong>Micro-prompt babysitting</strong> — "commit and push" ×51, "please continue" ×12, each forcing a full-context pass in a fat session.</li>
+  <li><strong>Invisible automation fleet</strong> — 202/458 sessions are a per-commit security-review hook, all on frontier models.</li>
+  <li><strong>Startup toll</strong> — ~53k-token baseline context loaded into every session by hooks/plugins/skills.</li>
+  <li><strong>Small tool frictions</strong> — 4,382 <code>cd</code>-prefixed Bash calls, ~700 <code>cat/find/grep</code>-in-Bash, 871 redundant re-reads, 178 &gt;8k-char pastes.</li>
+</ul>
+<p>The goal is a <em>tutor</em> that (a) catches known habits at the moment they recur, (b) discovers <em>new</em> habits as they form, and (c) surfaces unknown unknowns — including habits present since day one, capabilities never used, and patterns no current metric measures. The user's memory is explicitly not part of the design: every cue lives in the environment.</p>
+
+<div class="callout">
+<strong>Core architectural principle — the compilation ladder.</strong> Expensive intelligence (LLM analysis) runs <em>rarely</em>, on small aggregates; its discoveries are compiled downward into <em>zero-token deterministic sensors</em> (hooks, scripts, statusline) that run <em>always</em>. The enforcement layer never costs tokens when behavior is good, never hallucinates, and never depends on a model being loaded. The discovery layer is the only part that spends tokens — a bounded ~30–60k/week on a cheap model, versus the 13.2B historical burn it polices (&lt;0.001%/yr at current rates).
+</div>
+
+<h2>2. System overview</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>Loop</th><th>Cadence</th><th>Mechanism</th><th>Token cost</th><th>Job</th></tr>
+  <tr><td><strong>Fast loop</strong></td><td>Every prompt</td><td>Deterministic hook + rule file</td><td>0 idle; ~40/nudge</td><td>Enforce known habits in real time</td></tr>
+  <tr><td><strong>Ambient loop</strong></td><td>Continuous</td><td>Statusline script</td><td>0</td><td>Passive cue before the nudge is needed</td></tr>
+  <tr><td><strong>Slow loop</strong></td><td>Weekly</td><td>Stats script + 3 sensors + one cheap LLM call</td><td>~30–60k on Haiku/Sonnet</td><td>Discover new habits, propose rules, report trends</td></tr>
+  <tr><td><strong>Meta loop</strong></td><td>Weekly + quarterly</td><td><code>TUTOR-MODEL.md</code> + blind-spot pass</td><td>Included above; quarterly ~50k</td><td>Extend the tutor's own senses; retire stale rules</td></tr>
+</table>
+</div>
+<pre>
+ discoveries compile DOWN          observations flow UP
+┌─────────────────────────────────────────────────────────┐
+│  META LOOP    TUTOR-MODEL.md · "what didn't we ask?"    │
+│      │  new sensors / new rules / retirements     ▲     │
+│      ▼                                            │     │
+│  SLOW LOOP    Sensor A (presence) · B (absence) · C     │
+│      │        (out-of-model) → weekly report card ▲     │
+│      ▼  rules.json append (human-approved)        │     │
+│  FAST LOOP    UserPromptSubmit hook — 0 tokens    │     │
+│  AMBIENT      statusline meter — 0 tokens   ──────┘     │
+└─────────────────────────────────────────────────────────┘
+</pre>
+<p>All tutor state lives in one directory: <code>~/.claude/tutor/</code> — <code>rules.json</code>, <code>state.json</code>, <code>snapshots/</code> (weekly stats), <code>TUTOR-MODEL.md</code>, <code>reports/</code>. Everything is plain text, human-editable, and portable (consistent with the user's MMS portable-memory philosophy).</p>
+
+<h2>3. The pieces</h2>
+
+<div class="piece">
+<h3>P1 — Nudge hook (fast loop)<span class="tag build">build 1st</span></h3>
+<p class="label">Motivation</p>
+<p>Catches the two habits worth ~half of historical spend (god sessions, babysitting prompts) at the exact moment of recurrence. Removes memory from the loop entirely: the cue is environmental, fires at the point of behavior, and escalating counters make cost visible ("babysitting prompt #7 this week"). This is the enforcement floor everything else compiles into.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li>One <code>UserPromptSubmit</code> hook in <code>~/.claude/settings.json</code> running <code>tutor-hook.py</code> (stdlib Python, &lt;150 lines).</li>
+  <li>Hook receives JSON on stdin (<code>prompt</code>, <code>transcript_path</code>, <code>session_id</code>); emits <code>additionalContext</code> with a one-line nudge, or nothing.</li>
+  <li><strong>Rules are data, not code:</strong> <code>rules.json</code> holds an array of rules — <code>{id, kind: regex|threshold, pattern/metric, threshold, message, cooldown, status}</code>. The slow loop appends here; no code changes to evolve.</li>
+  <li>Seed rules: (1) babysitting regex <code>commit (and )?push|please continue|^continue$|what('s| is) (the )?next</code>; (2) god-session threshold — tail-read the last ~50 transcript lines, take the last assistant <code>usage</code> block, context = <code>input + cache_read + cache_creation</code>; nudge at 150k, escalate at 300k with a concrete instruction ("run handoff-after-clear, then /clear"); (3) fat-paste warning at &gt;8k-char prompt.</li>
+  <li><code>state.json</code> keeps per-rule counters + last-fired timestamps for cooldowns (no nagging every turn) and feeds the weekly report.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost"><strong>0 tokens</strong> when no rule fires (script runs outside the model, milliseconds); ~40 tokens per nudge. Deterministic — cannot hallucinate, cannot drift, works identically on any model. Rule file is human-readable and diffable.</p>
+</div>
+
+<div class="piece">
+<h3>P2 — Statusline ambient cue (ambient loop)<span class="tag aside">set aside</span></h3>
+<p class="label">Motivation</p>
+<p>"Make it obvious" — a permanently visible context meter and habit grade (🟢/🟡/🔴) means drift is seen <em>before</em> the P1 nudge fires, with zero interruption. Set aside from the first build because P1 delivers most of the value and the statusline is pure polish — but specified here so it isn't forgotten.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li><code>statusLine</code> command in settings pointing at a script that reads the same tail-of-transcript context estimate as P1 plus <code>state.json</code> nudge counters.</li>
+  <li>Renders e.g. <code>ctx 142k 🟡 · nudges this wk: 3</code>. The <code>statusline-setup</code> agent already installed can do the wiring.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost"><strong>0 tokens</strong>, ever — the statusline runs client-side. Reuses P1's code; ~30 lines of glue.</p>
+</div>
+
+<div class="piece">
+<h3>P3 — Weekly report card (slow loop, reporting half)<span class="tag build">build 2nd</span></h3>
+<p class="label">Motivation</p>
+<p>"Make it satisfying." Habits stick when progress is visible. Trend lines ("babysitting 51 → 9, sessions over 150k: 6 → 1, ~2.1B tokens saved") are the reward loop. Also the human approval gate: every rule/sensor the tutor wants to add is listed here for a yes/no — the tutor never modifies itself silently.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li>Weekly job (piggyback on the existing 17:30 cron, or Windows Task Scheduler / <code>claude</code> scheduled agent) runs <code>tutor-stats.py</code> — the audit script from 2026-07-21, extended — over transcripts modified in the last 7 days.</li>
+  <li>Writes <code>snapshots/YYYY-WW.json</code>; renders an HTML report card into <code>reports/</code> with week-over-week deltas, rule-fire counts from <code>state.json</code>, and pending proposals.</li>
+  <li>Metric set is itself data-driven where possible (a <code>metrics</code> manifest), so the meta loop can add sensors without rewriting the script core.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost"><strong>0 tokens</strong> for stats + report generation (pure script). Streams JSONL; never loads transcripts into a model context.</p>
+</div>
+
+<div class="piece">
+<h3>P4 — Sensor A: presence anomalies (slow loop)<span class="tag build">build 2nd</span></h3>
+<p class="label">Motivation</p>
+<p>New bad habits are, by definition, new repetition — and repetition always surfaces in habit-agnostic distributions (top repeated short prompts, first-prompt clusters, context percentiles, tool mix, interrupt rate, model mix, re-read counts, paste sizes). This is exactly how the original audit found "commit and push" without knowing to look for it. Catches habits <strong>you develop next month</strong>, not just today's list.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li><code>tutor-stats.py</code> computes the distributions; a diff step compares this week's snapshot to trailing 4-week baseline and emits only significant deltas (new prompt n-gram clusters, percentile shifts, tool-mix spikes) — a few KB.</li>
+  <li>One headless call: <code>claude -p --model claude-haiku-4-5 "&lt;standing prompt&gt; + &lt;delta JSON&gt;"</code> asking: <em>what new repeated pattern is emerging, is it wasteful, and if so propose a detector rule in rules.json schema</em>.</li>
+  <li>Proposals land in the P3 report card for approval; on yes, appended to <code>rules.json</code> → enforcement compiles down to P1 at zero marginal cost.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost">~5k tokens/week on Haiku. Sees only aggregates, never raw transcripts — cheap and privacy-tight by construction.</p>
+</div>
+
+<div class="piece">
+<h3>P5 — Sensor B: absence anomalies (slow loop)<span class="tag build">build 2nd</span></h3>
+<p class="label">Motivation</p>
+<p>Deltas can never catch <em>what you never do</em> — absence has no frequency. Yet non-use was half the audit's findings: <code>handoff-after-clear</code> installed but invoked once; Haiku used in 89 of 50,000 messages; <code>/compact</code> 8 times ever; 101 skills of unknown utilization. Also covers the platform moving underneath you: a new Claude Code feature can silently turn a current pattern into a legacy workaround.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li>Inventory script enumerates capabilities: <code>~/.claude/skills/</code>, plugin lists, hooks, model tiers, native features (compact, worktrees, background tasks, subagents) → cross-references invocation counts already extracted by <code>tutor-stats.py</code>.</li>
+  <li>Emits an "owned vs used" table with a staleness score; the weekly LLM call gets it alongside Sensor A's deltas and answers: <em>"what did not-using X cost this week?"</em></li>
+  <li>Monthly: WebFetch the Claude Code changelog/release notes; LLM checks new features against the current habit model ("does anything here obsolete a pattern in TUTOR-MODEL.md?").</li>
+  <li>Side benefit: the same table drives plugin/skill pruning suggestions (the ~53k startup toll from the audit).</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost">~3k tokens/week (shares the Sensor A call); changelog check ~2k/month. Inventory itself is 0 tokens.</p>
+</div>
+
+<div class="piece">
+<h3>P6 — Sensor C: out-of-model discovery (slow loop)<span class="tag build">build 3rd</span></h3>
+<p class="label">Motivation</p>
+<p>Sensors A and B are trapped inside the metric set — if the stats script doesn't compute it, it doesn't exist. The only escape from your own feature space is reading raw behavior cold. This is the sensor that surfaces true unknown unknowns, including habits present since day one (flat lines that no delta will ever flag). It is the single part of the system that makes it "living" rather than a dashboard, and the only recurring part that spends real tokens.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li>Weekly stratified sample of 3 sessions: one uniformly random, one most-expensive-this-week, one most-recent.</li>
+  <li>Extractor compresses each to a behavioral trace (~10k chars): all user turns verbatim + first 200 chars of each assistant reply + tool-call names — behavior, not content.</li>
+  <li>One headless call (Sonnet — this task rewards judgment) with the standing question: <em>"What is this person doing inefficiently that NONE of the following current metrics would catch? &lt;metric manifest&gt;. Propose either a rules.json detector or a new metric for the stats script."</em></li>
+  <li>Findings feed the P3 approval gate; approved metrics get added to the manifest → Sensor A watches them from then on.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost">~20–50k tokens/week on Sonnet. Bounded by the extractor cap regardless of session size. Discovery compiles downward: each finding becomes a 0-token sensor.</p>
+</div>
+
+<div class="piece">
+<h3>P7 — Meta loop: TUTOR-MODEL.md + self-extension<span class="tag build">build 3rd</span></h3>
+<p class="label">Motivation</p>
+<p>A living system needs memory of itself and pressure to grow. Without rule retirement, the tutor fossilizes into a museum of 2026 habits and nags about behaviors long fixed; without the "unasked question" step, its senses never expand. The model file tracks who you are <em>now</em>, not who you were in July.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li><code>TUTOR-MODEL.md</code> — one human-readable file: known habits (status: active / improving / retired), current sensor manifest, open hypotheses, decision log.</li>
+  <li>Every weekly run's LLM call ends with two mandatory outputs: (1) <em>"what question should this audit have asked that it didn't?"</em> → proposed sensor; (2) rules with zero fires in 30 days → proposed retirement.</li>
+  <li>All mutations flow through the P3 approval gate. The file is git-tracked in the tutor directory so the tutor's evolution is itself auditable.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost">~2k tokens/week (part of the weekly call). Keeps rules.json small — retirement is what keeps the fast loop fast and the nudges credible.</p>
+</div>
+
+<div class="piece">
+<h3>P8 — Quarterly blind-spot pass<span class="tag aside">set aside</span></h3>
+<p class="label">Motivation</p>
+<p>The weekly loop normalizes its own blind spots — whatever it consistently overlooks becomes invisible to it. A quarterly third-party audit of the tutor itself, using the already-installed <code>blind-spot-pass</code> skill with <code>TUTOR-MODEL.md</code> as input ("my Claude Code usage — what does this model of me not see?"), resets the frame. Set aside: valuable, but only after the weekly loop has a quarter of history to critique.</p>
+<p class="label">Implementation</p>
+<ul>
+  <li>Calendar reminder or quarterly cron prompting a manual run: <code>/blind-spot-pass</code> + the model file + latest 4 report cards.</li>
+  <li>Output reviewed by hand; accepted findings become sensors/rules via the normal gate.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost">~50k tokens/quarter. Human-in-the-loop by design.</p>
+</div>
+
+<div class="piece">
+<h3>P9 — Adjacent one-time fixes (not tutor components)<span class="tag once">one-time</span></h3>
+<p class="label">Motivation</p>
+<p>Audit findings that need a single repair, not ongoing coaching. Listed so they're not lost; excluded from the tutor because a tutor for a solved problem is dead weight.</p>
+<ul>
+  <li><strong>Gate the security-review hook</strong> — skip doc/lockfile-only diffs, batch per-push, pin to Haiku/Sonnet. Halves session count permanently (202/458 sessions).</li>
+  <li><strong>Plugin/skill pruning</strong> — via <code>plugin-skill-auditor</code>/<code>cco</code>; demote rarely-used globals to project scope to cut the ~53k startup toll. Sensor B keeps this honest afterward.</li>
+  <li><strong>Permission allowlist</strong> — run <code>fewer-permission-prompts</code>; removes the incentive behind 4,382 <code>cd</code>-prefixed compound Bash calls.</li>
+  <li><strong>CLAUDE.md standing rules</strong> — "commit and push after each module without asking" in active project CLAUDE.md files; converts 51 typed prompts into zero.</li>
+</ul>
+<p class="label">Cost &amp; benefits</p>
+<p class="cost">0 recurring tokens; each is minutes of setup with permanent payback.</p>
+</div>
+
+<h2>4. Cost model summary</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>Piece</th><th>Runs</th><th>Idle cost</th><th>Active cost</th><th>Model</th></tr>
+  <tr><td>P1 nudge hook</td><td>every prompt</td><td><strong>0 tokens</strong></td><td>~40 tokens/nudge</td><td>n/a (script)</td></tr>
+  <tr><td>P2 statusline</td><td>continuous</td><td><strong>0 tokens</strong></td><td>0</td><td>n/a (script)</td></tr>
+  <tr><td>P3 stats + report</td><td>weekly</td><td><strong>0 tokens</strong></td><td>0</td><td>n/a (script)</td></tr>
+  <tr><td>P4 Sensor A</td><td>weekly</td><td>—</td><td>~5k</td><td>Haiku</td></tr>
+  <tr><td>P5 Sensor B</td><td>weekly + monthly</td><td>—</td><td>~3k + 2k/mo</td><td>Haiku</td></tr>
+  <tr><td>P6 Sensor C</td><td>weekly</td><td>—</td><td>~20–50k</td><td>Sonnet</td></tr>
+  <tr><td>P7 meta loop</td><td>weekly</td><td>—</td><td>~2k</td><td>(shared call)</td></tr>
+  <tr><td>P8 blind-spot pass</td><td>quarterly</td><td>—</td><td>~50k</td><td>session model</td></tr>
+  <tr><td><strong>Total recurring</strong></td><td></td><td><strong>0</strong></td><td><strong>~30–60k/week</strong></td><td>cheap tiers</td></tr>
+</table>
+</div>
+<p>Context for scale: ~60k tokens/week ≈ 3M/year, against a measured historical burn of 13.25B — the tutor costs &lt;0.03% of what it polices, and the enforcement layer that runs thousands of times per week costs nothing at all.</p>
+<p><strong>Benefits beyond token cost:</strong> deterministic enforcement can't hallucinate or drift; nudges arrive at the moment of behavior (no reliance on memory — the original requirement); every rule and model file is plain text, human-editable, git-diffable, and portable across providers; the approval gate means the tutor never rewires itself silently; and each discovery permanently upgrades the free layer, so the system gets cheaper per insight over time.</p>
+
+<h2>5. Build order &amp; status</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>Stage</th><th>Pieces</th><th>Delivers</th><th>Status</th></tr>
+  <tr><td>1</td><td>P1 (+ P9 quick fixes)</td><td>Real-time catch of the two ~50%-of-spend habits</td><td><strong>implemented 2026-07-21</strong> — hook tested (regex, cooldown, 527k-ctx escalation); security-guidance gated (ENABLE_STOP_REVIEW=0, Sonnet); allowlist added; standing rules in 3 project CLAUDE.md files</td></tr>
+  <tr><td>2</td><td>P3 + P4 + P5</td><td>Trend reward loop + new-habit discovery + absence detection</td><td><strong>implemented 2026-07-21</strong> — tutor_weekly.py; schtasks "ClaudeTutorWeekly" Sun 18:00; first snapshot 2026-W30</td></tr>
+  <tr><td>3</td><td>P6 + P7</td><td>Unknown-unknown discovery + self-extension ("living")</td><td><strong>implemented 2026-07-21</strong> — Sensor C sampler + meta step in weekly engine; TUTOR-MODEL.md seeded; proposals gate via pending-proposals.json</td></tr>
+  <tr><td>later</td><td>P2, P8</td><td>Ambient cue; quarterly external audit of the tutor</td><td>set aside, specified</td></tr>
+</table>
+</div>
+<p class="small">Each stage works standalone. Open calibration decisions (deferred to build time): god-session nudge thresholds (proposed 150k / 300k), nudge cooldowns, weekly sample size for Sensor C, and which cron carries the weekly job.</p>
+
+</body>
+</html>

@@ -1,0 +1,60 @@
+{
+  "comment": "Living Claude Tutor rule file. The weekly loop proposes additions/retirements; a human approves. kinds: regex (on prompt), context_threshold (est. context tokens), prompt_length (chars).",
+  "rules": [
+    {
+      "id": "babysit-prompt",
+      "kind": "regex",
+      "pattern": "^(please )?(commit( (and|&))? push|push( it)?( up)?|continue|go on|keep going|next( step)?|proceed)\\.?$|^what('s| is) (the )?next( step| task)?\\??$|^do you know what (the |our )?next task is\\??$",
+      "message": "⚠ Tutor: babysitting prompt #{count} this week. This 3-word turn re-reads the ENTIRE session context. Batch instructions up front, or make it a CLAUDE.md standing rule (e.g. 'commit and push after each module without asking').",
+      "cooldown_min": 15,
+      "priority": 3,
+      "status": "active",
+      "added": "2026-07-21",
+      "source": "audit-2026-07-21"
+    },
+    {
+      "id": "god-session-150k",
+      "kind": "context_threshold",
+      "threshold": 150000,
+      "message": "⚠ Tutor: this session is at ~{ctx_k}k context tokens. Every turn from here costs 3x+ baseline. At the next natural pause: run the handoff-after-clear skill, then /clear. (Audit: sessions like this one were ~49% of all historical spend.)",
+      "cooldown_min": 45,
+      "priority": 2,
+      "status": "active",
+      "added": "2026-07-21",
+      "source": "audit-2026-07-21"
+    },
+    {
+      "id": "god-session-300k",
+      "kind": "context_threshold",
+      "threshold": 300000,
+      "message": "🔴 Tutor ESCALATION: ~{ctx_k}k context tokens. This is god-session territory - the single most expensive habit on record. Stop adding scope. Run handoff-after-clear NOW, commit state to HANDOFF.md, then /clear. A fresh session resumes from the file at ~15x lower cost per turn.",
+      "cooldown_min": 30,
+      "priority": 1,
+      "suppresses": ["god-session-150k"],
+      "status": "active",
+      "added": "2026-07-21",
+      "source": "audit-2026-07-21"
+    },
+    {
+      "id": "orphan-taskcreate",
+      "kind": "orphan_taskcreate",
+      "message": "⚠ Tutor: this session created a task list but never updated it — a dead task list burns tokens with zero tracking value. Either keep it current or skip TaskCreate for work this size.",
+      "cooldown_min": 120,
+      "priority": 5,
+      "status": "active",
+      "added": "2026-07-21",
+      "source": "sensor-c-2026-W30, approved by user"
+    },
+    {
+      "id": "fat-paste",
+      "kind": "prompt_length",
+      "threshold": 8000,
+      "message": "⚠ Tutor: this prompt is over 8k characters. Pasted content stays in context EVERY turn for the rest of the session. If it lives in a file, reference the path instead and let Claude read selectively.",
+      "cooldown_min": 60,
+      "priority": 4,
+      "status": "active",
+      "added": "2026-07-21",
+      "source": "audit-2026-07-21"
+    }
+  ]
+}

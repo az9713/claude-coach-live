@@ -1,0 +1,5 @@
+state.json
+weekly.log
+snapshots/
+reports/
+__pycache__/

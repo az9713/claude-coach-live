@@ -1,0 +1,7 @@
+tutor/state.json
+tutor/snapshots/
+tutor/reports/
+tutor/pending-proposals.json
+__pycache__/
+.ignore/
+HANDOFF.md
