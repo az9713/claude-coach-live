@@ -33,8 +33,4 @@ Seeded from the 2026-07-21 audit (458 main sessions, 886 subagent/workflow trans
 - 2026-07-21: W30 proposals resolved via chat. Approved: orphan-taskcreate rule (fast loop), deferral_total metric (Sensor A). Rejected: budget-disclosed-late rule, re-read-density metric. Deferred: 8-skill prune shortlist until 4 weeks of usage data (open hypothesis: cerebras-brain trio is used in other weeks).
 - 2026-07-21: security-review finding (indirect prompt injection via Sensor C traces) hardened: UNTRUSTED preamble added to both LLM prompts; approval gate remains the primary control.
 - 2026-07-22: P2 (statusline ambient cue) and P8 (quarterly blind-spot pass) implemented; SPEC-V2.md written (18-waste sensor expansion + Sensor F quality guard) — spec only, not yet implemented.
-- 2026-07-22: weekly run (102 sessions, 0 proposals pending, errors: none)
-- 2026-07-22: weekly run (102 sessions, 0 proposals pending, errors: none)
-- 2026-07-22: weekly run (102 sessions, 0 proposals pending, errors: none)
-- 2026-07-22: weekly run (102 sessions, 0 proposals pending, errors: none)
-- 2026-07-22: weekly run (102 sessions, 0 proposals pending, errors: none)
+- 2026-07-22: unified into **Live Claude Coach** (repo renamed from living-claude-tutor). Phase 1 shipped: feature catalog (`coach_sync.py`, fetch→distill→diff, host-allowlisted), `capability_gap` + `tool_sequence` hook rule kinds with doc-URL citations, deterministic cross-session repetition pass, on-demand review skill (`coach-review`, natural-language triggered). First live catalog sync: 12 Claude Code features distilled from docs + changelog. Efficiency and capability findings now share one engine/report/approval gate. Phase 2 pending (full-Claude feature spotlight, catalog audit inside the quarterly blind-spot pass, auto-retirement of detectors for deprecated features).
