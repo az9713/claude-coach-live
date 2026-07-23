@@ -88,6 +88,8 @@ def load_catalog():
             features.append({
                 "id": feat.get("id"),
                 "name": feat.get("name"),
+                "surface": feat.get("surface", "claude-code"),
+                "surfaces_observable": feat.get("surfaces_observable", True),
                 "replaces_antipattern": feat.get("replaces_antipattern"),
                 "observable_signal": feat.get("observable_signal"),
             })
@@ -111,6 +113,42 @@ def catalog_summary_line(features, whats_new):
                   if re.match(r"^\s*[-*]\s*(NEW|CHANGED)\b", ln, re.I)])
     new_count = marked or len([ln for ln in whats_new.splitlines() if ln.strip()])
     return "%s features known; %s new/changed since last sync." % (len(features), new_count)
+
+
+def load_spotlight_shown():
+    """feature_ids already surfaced as spotlights (so we rotate instead of repeating)."""
+    try:
+        return json.load(open(STATEFILE, encoding="utf-8")).get("spotlight_shown", [])
+    except Exception:
+        return []
+
+
+def save_spotlight_shown(ids):
+    """Read-modify-write state.json, preserving the hook's fires/counters keys."""
+    try:
+        st = json.load(open(STATEFILE, encoding="utf-8"))
+    except Exception:
+        st = {}
+    if not isinstance(st, dict):
+        st = {}
+    st["spotlight_shown"] = ids
+    with open(STATEFILE, "w", encoding="utf-8") as f:
+        json.dump(st, f, indent=1)
+
+
+def pick_spotlight(analyst_text, shown, cap=2):
+    """Pure-ish: extract the analyst's spotlight picks, drop already-shown / dupes, cap.
+    Returns the list of new spotlight items (each {feature_id, name, why_relevant, doc_url})."""
+    payload = parse_proposals(analyst_text)
+    picks, seen = [], set(shown)
+    for item in (payload.get("spotlight") or []) if isinstance(payload, dict) else []:
+        fid = isinstance(item, dict) and item.get("feature_id")
+        if fid and fid not in seen:
+            seen.add(fid)
+            picks.append(item)
+            if len(picks) >= cap:
+                break
+    return picks
 
 
 # ---------- Phase 1: stats snapshot (Sensor A input) ----------
@@ -384,7 +422,10 @@ OWNED-VS-USED INVENTORY (Sensor B):
 ACTIVE RULES:
 %s
 
-FEATURE CATALOG (id, name, replaces_antipattern, observable_signal - may be empty if not yet synced):
+FEATURE CATALOG (id, name, surface, surfaces_observable, replaces_antipattern, observable_signal - may be empty if not yet synced):
+%s
+
+ALREADY-SPOTLIGHTED (do NOT surface these feature_ids again this time):
 %s
 
 WHAT'S NEW SINCE LAST CATALOG SYNC:
@@ -395,8 +436,9 @@ Answer in this order:
 2. ABSENCE FINDINGS: what owned-but-unused capability plausibly cost the most this week? Include a plugin/skill prune shortlist (max 8) of globally-loaded items with no usage.
 3. RETIREMENTS: any active rule that appears stale?
 4. UNASKED QUESTION: what question should this audit have asked that it didn't? Propose ONE new metric, concretely computable from transcript JSONL.
-5. CAPABILITY GAPS: given the feature catalog and this week's behavior, where is the user hand-rolling something a feature does, or repeating a workflow a newer feature (see what's-new) replaces? Propose detectors.
-Then output ONE fenced ```json block: {"proposals": [{"id": "...", "kind": "regex|context_threshold|prompt_length", "pattern_or_threshold": "...", "message": "...", "rationale": "..."}], "capability_proposals": [{"id": "...", "kind": "capability_gap|tool_sequence", "category": "capability", "pattern": "...", "feature_id": "...", "doc_url": "...", "message": "...", "cooldown_min": 30, "priority": 3, "status": "proposed", "source": "analyst-%s"}], "retire": ["rule-id"], "new_metric": {"name": "...", "definition": "..."}, "prune_shortlist": ["..."]} (empty arrays if none)."""
+5. CAPABILITY GAPS: given the feature catalog and this week's behavior, where is the user hand-rolling something a feature does, or repeating a workflow a newer feature (see what's-new) replaces? Propose detectors. (Only for surfaces_observable=true features — those are visible in CLI transcripts.)
+6. SPOTLIGHT: from features with surfaces_observable=false (api/claude.ai/artifacts — the coach cannot catch these in the act), pick AT MOST 2 that are most relevant to THIS WEEK'S work themes and not in the already-spotlighted list. Report-only awareness nudges, never detectors. Say 'none' if nothing is clearly relevant — do NOT fill the quota for its own sake.
+Then output ONE fenced ```json block: {"proposals": [{"id": "...", "kind": "regex|context_threshold|prompt_length", "pattern_or_threshold": "...", "message": "...", "rationale": "..."}], "capability_proposals": [{"id": "...", "kind": "capability_gap|tool_sequence", "category": "capability", "pattern": "...", "feature_id": "...", "doc_url": "...", "message": "...", "cooldown_min": 30, "priority": 3, "status": "proposed", "source": "analyst-%s"}], "spotlight": [{"feature_id": "...", "name": "...", "why_relevant": "...", "doc_url": "..."}], "retire": ["rule-id"], "new_metric": {"name": "...", "definition": "..."}, "prune_shortlist": ["..."]} (empty arrays if none)."""
 
 SENSOR_C_PROMPT = UNTRUSTED + """You are Sensor C of a living coach: the out-of-model discovery pass. Below are raw \
 behavioral traces (user turns, assistant openings, tool sequences) from 3 stratified Claude Code sessions, \
@@ -423,7 +465,8 @@ def esc(x):
     return html.escape(str(x))
 
 
-def render_report(snap, deltas, inv, analyst, sensor_c, errors, rule_fires, catalog_note):
+def render_report(snap, deltas, inv, analyst, sensor_c, errors, rule_fires, catalog_note,
+                  spotlight=None):
     rows = "".join(
         "<tr><td>%s</td><td>%s</td><td>%s</td></tr>" %
         (esc(k), esc(v.get("now", v) if isinstance(v, dict) else v),
@@ -437,6 +480,12 @@ def render_report(snap, deltas, inv, analyst, sensor_c, errors, rule_fires, cata
     reps = "".join(
         "<li><code>%s</code> — %s× across %s sessions</li>" % (esc(p), c, sc)
         for p, c, sc in snap.get("repeated_workflows", []))
+    spot = "".join(
+        "<li><b>%s</b> <code>%s</code> — %s%s</li>" % (
+            esc(s.get("name", s.get("feature_id", "?"))), esc(s.get("feature_id", "")),
+            esc(s.get("why_relevant", "")),
+            (" · <a href='%s'>docs</a>" % esc(s["doc_url"])) if s.get("doc_url") else "")
+        for s in (spotlight or []))
     return """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Coach report %s</title>
 <style>body{font:15px/1.5 'Segoe UI',sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#222}
 table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 10px}pre{background:#f5f5f5;padding:1rem;
@@ -453,6 +502,8 @@ white-space:pre-wrap}h2{border-bottom:1px solid #ddd}.err{color:#b00}</style></h
 <h2>Capability gaps & what's new</h2>
 <p>%s</p>
 <h3>Repeated workflows this week (≥3× total, ≥2 sessions)</h3><ul>%s</ul>
+<h2>Spotlight — full-Claude features to try (awareness-only)</h2>
+<p>Features on surfaces the coach can't see in CLI transcripts (API/claude.ai), picked for this week's work. Rotates; never nags.</p><ul>%s</ul>
 <p><b>Proposals are pending in pending-proposals.json — nothing is auto-applied.</b>
 Approve by telling Claude to move a proposal into rules.json.</p></body></html>""" % (
         WEEK, WEEK, err, fires or "<li>none</li>", rows, newp or "<li>none</li>",
@@ -461,7 +512,7 @@ Approve by telling Claude to move a proposal into rules.json.</p></body></html>"
         inv["usage_this_week"]["haiku_share"],
         inv["usage_this_week"]["opus_fable_share"],
         prune or "<li>none</li>", esc(analyst or "(skipped)"), esc(sensor_c or "(skipped)"),
-        esc(catalog_note), reps or "<li>none</li>")
+        esc(catalog_note), reps or "<li>none</li>", spot or "<li>none</li>")
 
 
 def main():
@@ -490,18 +541,24 @@ def main():
 
     features, whats_new = load_catalog()
     catalog_note = catalog_summary_line(features, whats_new)
+    spotlight_shown = load_spotlight_shown()
 
     analyst = sensor_c = None
+    spotlight = []
     errors = []
     if not no_llm:
         print("[5/6] analyst call (haiku)...")
         analyst, e1 = call_claude(ANALYST_PROMPT % (
             model_file(), json.dumps(deltas, indent=1),
             json.dumps({k: v for k, v in inv.items() if k != "skills_owned"}, indent=1),
-            rules_brief, json.dumps(features, indent=1), whats_new or "(none)", WEEK),
+            rules_brief, json.dumps(features, indent=1),
+            json.dumps(spotlight_shown) or "[]", whats_new or "(none)", WEEK),
             "haiku")
         if e1:
             errors.append("analyst: " + e1)
+        spotlight = pick_spotlight(analyst, spotlight_shown)
+        if spotlight:
+            save_spotlight_shown(spotlight_shown + [s["feature_id"] for s in spotlight])
         if traces:
             print("[5/6] sensor C call (sonnet)...")
             tr = "\n\n".join("=== %s (%s) ===\n%s" % (t["label"], t["file"], t["trace"])
@@ -532,7 +589,7 @@ def main():
     rpt = os.path.join(REPORTDIR, WEEK + ".html")
     with open(rpt, "w", encoding="utf-8") as f:
         f.write(render_report(snap_public, deltas, inv, analyst, sensor_c, errors, fires,
-                              catalog_note))
+                              catalog_note, spotlight))
     with open(MODELFILE, "a", encoding="utf-8") as f:
         f.write("- %s: weekly run (%s sessions, %s proposals pending, errors: %s)\n"
                 % (time.strftime("%Y-%m-%d"), snap["sessions"],

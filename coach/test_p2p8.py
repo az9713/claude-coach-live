@@ -3,6 +3,8 @@ Run: python test_p2p8.py  -> prints OK or throws. Stdlib only, no framework."""
 import json, os, subprocess, sys, tempfile
 
 TUTOR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, TUTOR)
+from coach_weekly import pick_spotlight  # noqa: E402
 
 
 def run(script, stdin_text=None, args=()):
@@ -41,13 +43,26 @@ try:
 finally:
     os.unlink(fake_transcript)
 
-# --- P8: --no-llm builds the input package and spends zero tokens ---
+# --- P8: --no-llm builds the input package (now incl. the Phase 2 catalog block) ---
 code, out = run("coach_blindspot.py", args=("--no-llm",))
 assert code == 0, out
 assert "input package:" in out and "skipping audit call" in out, out
 pkg = out.split("input package:", 1)[1].splitlines()[0].strip()
 assert os.path.isfile(pkg), "package file missing: %s" % pkg
 txt = open(pkg, encoding="utf-8").read()
-assert "TUTOR-MODEL.md" in txt and "rules.json" in txt, "package incomplete"
+assert "COACH-MODEL.md" in txt and "rules.json" in txt, "package incomplete"
+assert "Feature catalog state" in txt, "Phase 2 catalog audit block missing from package"
 
-print("OK - P2 statusline + P8 blind-spot (--no-llm) self-checks passed")
+# --- Phase 2: spotlight pick + dedup (report-only rotation) ---
+analyst = ('noise\n```json\n{"spotlight":['
+           '{"feature_id":"api.prompt-caching","name":"Prompt caching"},'
+           '{"feature_id":"api.batch","name":"Batch API"},'
+           '{"feature_id":"api.pdf","name":"PDF support"}]}\n```')
+assert [p["feature_id"] for p in pick_spotlight(analyst, [], cap=2)] == \
+    ["api.prompt-caching", "api.batch"], "cap or order wrong"
+assert [p["feature_id"] for p in pick_spotlight(analyst, ["api.prompt-caching"], cap=2)] == \
+    ["api.batch", "api.pdf"], "already-shown not skipped"
+assert pick_spotlight(analyst, ["api.prompt-caching", "api.batch", "api.pdf"]) == [], \
+    "all-shown should surface nothing"
+
+print("OK - P2 statusline + P8 blind-spot + Phase 2 catalog/spotlight self-checks passed")

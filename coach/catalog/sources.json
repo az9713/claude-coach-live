@@ -1,14 +1,15 @@
 {
  "sources": [
-  {"name": "claude-code-changelog", "url": "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"},
-  {"name": "claude-code-common-workflows", "url": "https://code.claude.com/docs/en/common-workflows"},
-  {"name": "claude-code-slash-commands", "url": "https://code.claude.com/docs/en/slash-commands"},
-  {"name": "claude-code-cli-reference", "url": "https://code.claude.com/docs/en/cli-reference"},
-  {"name": "claude-code-interactive-mode", "url": "https://code.claude.com/docs/en/interactive-mode"},
-  {"name": "claude-code-sub-agents", "url": "https://code.claude.com/docs/en/sub-agents"},
-  {"name": "claude-code-hooks", "url": "https://code.claude.com/docs/en/hooks"},
-  {"name": "claude-code-mcp", "url": "https://code.claude.com/docs/en/mcp"},
-  {"name": "claude-code-memory", "url": "https://code.claude.com/docs/en/memory"},
-  {"name": "claude-code-overview", "url": "https://code.claude.com/docs/en/overview"}
+  {"name": "claude-code-changelog", "surface": "claude-code", "url": "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"},
+  {"name": "claude-code-common-workflows", "surface": "claude-code", "url": "https://code.claude.com/docs/en/common-workflows"},
+  {"name": "claude-code-slash-commands", "surface": "claude-code", "url": "https://code.claude.com/docs/en/slash-commands"},
+  {"name": "claude-code-cli-reference", "surface": "claude-code", "url": "https://code.claude.com/docs/en/cli-reference"},
+  {"name": "claude-code-interactive-mode", "surface": "claude-code", "url": "https://code.claude.com/docs/en/interactive-mode"},
+  {"name": "claude-code-sub-agents", "surface": "claude-code", "url": "https://code.claude.com/docs/en/sub-agents"},
+  {"name": "claude-code-hooks", "surface": "claude-code", "url": "https://code.claude.com/docs/en/hooks"},
+  {"name": "claude-code-mcp", "surface": "claude-code", "url": "https://code.claude.com/docs/en/mcp"},
+  {"name": "claude-code-memory", "surface": "claude-code", "url": "https://code.claude.com/docs/en/memory"},
+  {"name": "claude-code-overview", "surface": "claude-code", "url": "https://code.claude.com/docs/en/overview"},
+  {"name": "claude-api-build", "surface": "api", "url": "https://platform.claude.com/docs/en/build-with-claude/overview"}
  ]
 }

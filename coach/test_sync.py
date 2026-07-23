@@ -4,7 +4,7 @@ import os, subprocess, sys
 
 TUTOR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TUTOR)
-from coach_sync import diff_manifests  # noqa: E402
+from coach_sync import diff_manifests, rules_citing, build_manifest  # noqa: E402
 
 # --- diff_manifests: pure function, fixtures only, no network/LLM ---
 old_manifest = {
@@ -41,6 +41,28 @@ assert diff0["changed"] == [], diff0
 # a feature dropped from the docs shows up as removed
 diff1 = diff_manifests(new_manifest, old_manifest)
 assert diff1["removed"] == ["cc.plan-mode"], diff1
+
+# --- Phase 2: auto-retirement (rules_citing, pure) ---
+rules = [
+    {"id": "babysit-prompt"},                                  # no feature_id -> never retired
+    {"id": "cap-atfile", "feature_id": "cc.at-file-reference"},
+    {"id": "cap-gone", "feature_id": "cc.removed-feat"},
+]
+assert rules_citing(["cc.removed-feat"], rules) == ["cap-gone"], rules_citing(["cc.removed-feat"], rules)
+assert rules_citing([], rules) == []
+assert rules_citing(["cc.at-file-reference", "cc.removed-feat"], rules) == ["cap-atfile", "cap-gone"]
+
+# --- Phase 2: non-code surfaces are forced awareness-only in build_manifest ---
+man = build_manifest([
+    {"id": "cc.x", "surface": "claude-code", "surfaces_observable": True,
+     "observable_signal": {"kind": "regex", "hint": "h"}},
+    {"id": "api.y", "surface": "api", "surfaces_observable": True,   # distiller over-claimed
+     "observable_signal": {"kind": None, "hint": ""}},
+], "2026-07-22", "2026-07-22T00:00:00")
+by_id = {f["id"]: f for f in man["features"]}
+assert by_id["cc.x"]["surfaces_observable"] is True, by_id["cc.x"]
+assert by_id["api.y"]["surfaces_observable"] is False, by_id["api.y"]  # api can't be seen in transcripts
+assert by_id["api.y"]["surface"] == "api"
 
 # --- coach_sync.py --no-fetch --no-llm must run fully offline and exit 0 ---
 p = subprocess.run([sys.executable, os.path.join(TUTOR, "coach_sync.py"),

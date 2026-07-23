@@ -14,7 +14,8 @@ import glob, json, os, sys, time
 TUTOR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, TUTOR)
 from coach_weekly import (call_claude, parse_proposals, model_file, UNTRUSTED,  # noqa: E402
-                          SNAPDIR, REPORTDIR, PENDING, MODELFILE, RULESFILE)
+                          SNAPDIR, REPORTDIR, PENDING, MODELFILE, RULESFILE,
+                          MANIFESTFILE, WHATSNEWFILE)
 
 QUARTER = "%s-Q%d" % (time.strftime("%Y"), (time.localtime().tm_mon - 1) // 3 + 1)
 
@@ -32,6 +33,9 @@ ITS ACTIVE RULE FILE (rules.json):
 ITS LAST %d WEEKLY SNAPSHOTS (every metric it knows how to compute):
 %s
 
+ITS FEATURE CATALOG STATE (manifest summary + capability detectors + latest what's-new):
+%s
+
 Work through, in order:
 1. STACK MAP: sketch the full space of Claude Code cost/quality waste (context, prompting, tooling,
    orchestration, config, cross-session, model choice). Mark each region COVERED or BLIND given the
@@ -42,14 +46,46 @@ Work through, in order:
 4. RAT-HOLES: where could the tutor waste effort on metrics that sound useful but change no behavior?
 5. HIGH-YIELD UNASKED QUESTIONS: the 3 questions this audit should ask next quarter, each with a
    concretely computable sensor spec (from transcript JSONL, stdlib only).
+6. CATALOG AUDIT: is the feature catalog current and honest? Features named in the changelog/what's-new
+   but missing from the manifest (distillation gaps)? Capability detectors whose catalog_version is stale
+   vs the current manifest, or that cite a feature no longer present? Spotlight (surfaces_observable=false)
+   features that keep getting surfaced but never convert to use — awareness fatigue?
 
 Then ONE fenced ```json block:
 {"blind_spots": [{"region": "...", "why_invisible": "...", "evidence": "..."}],
  "proposals": [{"id": "...", "kind": "regex|context_threshold|prompt_length|weekly_metric",
                 "pattern_or_threshold": "...", "message": "...", "rationale": "..."}],
+ "catalog_findings": [{"issue": "...", "fix": "..."}],
  "retire": ["rule-id"],
  "unasked": [{"question": "...", "sensor_spec": "..."}]}
 (empty arrays if none)."""
+
+
+def catalog_package():
+    """Summary of the catalog's state for the audit: feature/surface counts, the capability
+    detectors and the manifest version they were compiled against, and the latest what's-new."""
+    try:
+        man = json.load(open(MANIFESTFILE, encoding="utf-8"))
+        feats = man.get("features", [])
+        version = man.get("catalog_version", "?")
+    except Exception:
+        feats, version = [], "-"
+    surfaces = {}
+    for f in feats:
+        surfaces[f.get("surface", "?")] = surfaces.get(f.get("surface", "?"), 0) + 1
+    try:
+        rules = json.load(open(RULESFILE, encoding="utf-8")).get("rules", [])
+    except Exception:
+        rules = []
+    cap = [{"id": r.get("id"), "feature_id": r.get("feature_id"),
+            "catalog_version": r.get("catalog_version")} for r in rules if r.get("feature_id")]
+    try:
+        whatsnew = open(WHATSNEWFILE, encoding="utf-8").read()[:2000]
+    except Exception:
+        whatsnew = "(none)"
+    return ("manifest version: %s; %d features by surface: %s\ncapability detectors: %s\n"
+            "latest what's-new:\n%s" % (version, len(feats), json.dumps(surfaces),
+                                        json.dumps(cap) if cap else "(none compiled yet)", whatsnew))
 
 
 def build_package():
@@ -60,18 +96,19 @@ def build_package():
         rules_txt = open(RULESFILE, encoding="utf-8").read()
     except OSError:
         rules_txt = "(missing)"
-    return model_file(), rules_txt, len(snaps), snap_txt
+    return model_file(), rules_txt, len(snaps), snap_txt, catalog_package()
 
 
 def main():
     no_llm = "--no-llm" in sys.argv
-    model, rules_txt, n, snap_txt = build_package()
+    model, rules_txt, n, snap_txt, catalog_txt = build_package()
 
     inp = os.path.join(REPORTDIR, "blindspot-input-%s.md" % QUARTER)
     with open(inp, "w", encoding="utf-8") as f:
-        f.write("# Blind-spot pass input - %s\n\n## TUTOR-MODEL.md\n%s\n"
+        f.write("# Blind-spot pass input - %s\n\n## COACH-MODEL.md\n%s\n"
                 "\n## rules.json\n```json\n%s\n```\n\n## Last %d weekly snapshots\n%s\n"
-                % (QUARTER, model, rules_txt, n, snap_txt))
+                "\n## Feature catalog state\n%s\n"
+                % (QUARTER, model, rules_txt, n, snap_txt, catalog_txt))
     print("[1/3] input package: %s" % inp)
 
     if no_llm:
@@ -81,7 +118,7 @@ def main():
         return
 
     print("[2/3] blind-spot audit call (sonnet)...")
-    out, err = call_claude(PROMPT % (model, rules_txt, n, snap_txt), "sonnet", timeout=900)
+    out, err = call_claude(PROMPT % (model, rules_txt, n, snap_txt, catalog_txt), "sonnet", timeout=900)
     if err:
         print("error: %s" % err)
         with open(MODELFILE, "a", encoding="utf-8") as f:
@@ -105,9 +142,10 @@ def main():
             json.dump(pend, f, indent=1)
 
     with open(MODELFILE, "a", encoding="utf-8") as f:
-        f.write("- %s: blind-spot pass %s (%s blind spots, %s proposals pending review)\n"
+        f.write("- %s: blind-spot pass %s (%s blind spots, %s proposals, %s catalog findings pending review)\n"
                 % (time.strftime("%Y-%m-%d"), QUARTER,
-                   len(payload.get("blind_spots", [])), len(payload.get("proposals", []))))
+                   len(payload.get("blind_spots", [])), len(payload.get("proposals", [])),
+                   len(payload.get("catalog_findings", []))))
     print("[3/3] report: %s (proposals pending - nothing auto-applied)" % rpt)
 
 
