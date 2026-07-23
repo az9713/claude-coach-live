@@ -30,7 +30,10 @@ SOURCESFILE = os.path.join(CATALOG, "sources.json")
 MANIFEST = os.path.join(CATALOG, "manifest.json")
 MANIFEST_PREV = os.path.join(CATALOG, "manifest.prev.json")
 WHATSNEW = os.path.join(CATALOG, "whats_new.md")
-ALLOWED_HOST_SUFFIXES = ("anthropic.com", "claude.com")
+# githubusercontent.com: the Claude Code changelog is first-party (anthropics/claude-code),
+# and release-notes/claude-code now redirects there. ponytail: suffix-scoped, not repo-scoped;
+# the pinned sources.json URLs are the real control, allowlist is defense-in-depth.
+ALLOWED_HOST_SUFFIXES = ("anthropic.com", "claude.com", "githubusercontent.com")
 
 os.makedirs(RAWDIR, exist_ok=True)
 
@@ -99,7 +102,10 @@ def strip_html(text):
     return text.strip()
 
 
-def build_docs_blob(fetched, per_source_chars=8000, max_chars=40000):
+# Per-source cap keeps any one bloated Mintlify doc page (or the ~450KB changelog) from
+# starving the others; the total holds all 10 sources whole (~365K chars) so every
+# feature-dense subpage reaches the distiller, changelog newest-first.
+def build_docs_blob(fetched, per_source_chars=50000, max_chars=450000):
     parts = []
     for item in fetched:
         try:
@@ -122,7 +128,16 @@ TODAY: %s
 FETCHED DOCS (Claude Code docs + changelog):
 %s
 
-For each distinct Claude Code feature you can identify in the text, extract:
+GRANULARITY (most important): extract SPECIFIC, ACTIONABLE features - a single command, flag, \
+mode, or capability the user would concretely invoke (e.g. `@file` reference, `--resume`, the \
+`/rewind` command, background `/code-review` subagents, `Tab` to toggle extended thinking). \
+The changelog lists individually-named features per release - mine it entry by entry, favoring \
+the MOST RECENT releases. NEVER emit broad umbrella buckets like "File Editing", "Bug Fixing", \
+"Code Search", or "MCP Support" - those are useless to a coach. If a feature has no concrete \
+observable workaround it replaces, skip it. Extract the ~40 most specific and currently-relevant \
+features (prefer recent + concrete over old + generic).
+
+For each such feature, extract:
 - id: a short kebab-case slug (e.g. "at-file-reference")
 - name
 - what_it_does: one or two sentences
