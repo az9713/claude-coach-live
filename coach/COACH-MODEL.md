@@ -1,7 +1,11 @@
 # COACH-MODEL.md — living model of the user's Claude Code usage
 
-Maintained by the weekly tutor loop. All mutations proposed via report card, human-approved.
+Maintained by the weekly coach loop. All mutations proposed via report card, human-approved.
 Seeded from the 2026-07-21 audit (458 main sessions, 886 subagent/workflow transcripts, ~1 GB).
+
+> Naming: product is **Claude Coach Live**; GitHub repo `az9713/claude-coach-live`;
+> working dir still `living-claude-tutor/` (cosmetic). Earlier names — "Living Claude
+> Tutor", "Live Claude Coach" — appear in the dated decision log as historical record.
 
 ## Known habits
 
