@@ -6,7 +6,7 @@ report card HTML + pending proposals (human-approved, never auto-applied).
 Usage: python coach_weekly.py [--no-llm] [--changelog] [--days 7]
 Stdlib only. All state under this script's directory.
 """
-import json, os, glob, re, sys, time, random, subprocess, shutil, html
+import json, os, glob, re, sys, time, random, subprocess, shutil, html, hashlib
 from collections import Counter
 
 TUTOR = os.path.dirname(os.path.abspath(__file__))
@@ -52,6 +52,44 @@ def normalize_prompt(txt):
     whitespace, and fold digit runs to '#' so e.g. 'fix issue 123' == 'fix issue 456'."""
     norm = re.sub(r"\s+", " ", txt.strip().lower())
     return re.sub(r"\d+", "#", norm)
+
+
+# ---------- SPEC-V2-TRIMMED §0: self-contamination guard ----------
+COACH_MARKERS = ("live-claude-tutor", "living-claude-tutor", "claude-coach-live")
+
+
+def is_coach_file(path):
+    """§0: True if this transcript IS coach-dev work. The coach's own sessions contain
+    its detector vocabulary ('revert', 'you broke', 'Traceback', the detector regexes
+    themselves) and would otherwise score as the noisiest sessions in the dataset.
+    Directory-level exclusion — the spec's preferred fix over the regex-context fallback.
+    ponytail: substring match on the slugified path; add the narrower fix only if this
+    proves too coarse."""
+    norm = re.sub(r"[^a-z0-9]+", "-", path.lower())
+    return any(m in norm for m in COACH_MARKERS)
+
+
+def handle_tool_result(s, blk):
+    """SPEC-V2-TRIMMED §1.2/§1.3: score a single tool_result block against the session `s`.
+    Needs s['tu'] (tool_use_id -> (name, first_cmd_token)) already populated from the
+    preceding assistant turn."""
+    name, tok = s["tu"].get(blk.get("tool_use_id"), ("?", ""))
+    content = blk.get("content")
+    length = len(content if isinstance(content, str) else json.dumps(content, default=str))
+    if length > 20000:                                   # §1.3 verbose tool results
+        s["verbose"].append((name, length))
+    if name in ("Bash", "PowerShell"):                   # §1.2 failed-command loops
+        s["bash_res"] += 1
+        if blk.get("is_error"):
+            s["bash_err"] += 1
+            if tok and tok == s["loop_token"]:
+                s["loop_streak"] += 1
+            else:
+                s["loop_token"], s["loop_streak"] = tok, 1
+            if s["loop_streak"] == 3:                     # count once per 3+ streak
+                s["loops"] += 1
+        else:
+            s["loop_token"], s["loop_streak"] = None, 0
 
 
 def repeated_workflows(sessions_prompts, min_count=3, min_sessions=2, top_n=20):
@@ -163,7 +201,12 @@ def build_snapshot(days):
     for f in files:
         s = {"file": f, "turns": 0, "out": 0, "peak": 0, "babysit": 0,
              "deferral": 0, "first": None, "reads": Counter(), "interrupts": 0,
-             "prompts": []}
+             "prompts": [],
+             # SPEC-V2-TRIMMED detectors
+             "is_coach": is_coach_file(f), "first_asst_ctx": None,
+             "tu": {}, "verbose": [], "bash_res": 0, "bash_err": 0,
+             "loop_token": None, "loop_streak": 0, "loops": 0,
+             "ts_single": 0, "pastes": set()}
         try:
             fh = open(f, encoding="utf-8", errors="replace")
         except OSError:
@@ -178,6 +221,10 @@ def build_snapshot(days):
                 if t == "user":
                     c = (d.get("message") or {}).get("content")
                     txt = extract_text(c)
+                    if isinstance(c, list):              # §1.2/§1.3: score tool_results
+                        for blk in c:
+                            if isinstance(blk, dict) and blk.get("type") == "tool_result":
+                                handle_tool_result(s, blk)
                     if "[Request interrupted by user" in txt:
                         s["interrupts"] += 1
                         continue
@@ -185,6 +232,9 @@ def build_snapshot(days):
                         continue
                     s["turns"] += 1
                     s["prompts"].append(txt)
+                    if len(txt) > 8000:                  # §1.4 paste-again
+                        s["pastes"].add(hashlib.sha1(
+                            normalize_prompt(txt[:4000]).encode("utf-8", "replace")).hexdigest())
                     if s["first"] is None:
                         s["first"] = txt[:100]
                         w = txt.strip().lower().split()[:2]
@@ -205,25 +255,58 @@ def build_snapshot(days):
                            + (u.get("cache_creation_input_tokens") or 0))
                     s["peak"] = max(s["peak"], ctx)
                     s["out"] += u.get("output_tokens") or 0
+                    if s["first_asst_ctx"] is None:      # §1.1 startup toll (input+cache_creation)
+                        s["first_asst_ctx"] = ((u.get("input_tokens") or 0)
+                                               + (u.get("cache_creation_input_tokens") or 0))
                     for blk in (m.get("content") or []):
                         if isinstance(blk, dict) and blk.get("type") == "tool_use":
-                            tools[blk.get("name", "?")] += 1
+                            name = blk.get("name", "?")
+                            tools[name] += 1
                             inp = blk.get("input") or {}
-                            if blk.get("name") == "Read" and inp.get("file_path"):
+                            tok = ""
+                            if name in ("Bash", "PowerShell"):
+                                tok = ((inp.get("command") or "").strip().split() or [""])[0]
+                            if blk.get("id"):             # §1.2/§1.3: map id -> (tool, cmd token)
+                                s["tu"][blk["id"]] = (name, tok)
+                            if name == "ToolSearch":      # §1.5 single-select dribble
+                                q = (inp.get("query") or "").strip().lower()
+                                if q.startswith("select:") and "," not in q:
+                                    s["ts_single"] += 1
+                            if name == "Read" and inp.get("file_path"):
                                 s["reads"][inp["file_path"]] += 1
-                            if blk.get("name") == "Bash":
+                            if name == "Bash":
                                 m1 = re.match(r"^(cat|find|grep|echo|head|tail|ls|sed|awk)\b",
                                               (inp.get("command") or "").strip())
                                 if m1:
                                     bash_anti[m1.group(1)] += 1
-                            if blk.get("name") == "Skill" and inp.get("skill"):
+                            if name == "Skill" and inp.get("skill"):
                                 tools["Skill:" + inp["skill"]] += 1
         s["rereads"] = sum(v - 1 for v in s["reads"].values() if v > 1)
         del s["reads"]
         sess.append(s)
 
+    # ---------- SPEC-V2-TRIMMED §1 detectors (§0 guard: coach-dev sessions excluded) ----------
+    live = [x for x in sess if not x["is_coach"]]
+    toll = sorted(x["first_asst_ctx"] for x in live
+                  if x["turns"] <= 1 and x["first_asst_ctx"])          # §1.1
+    verbose_all = [v for x in live for v in x["verbose"]]              # §1.3
+    hash_sessions = Counter()                                          # §1.4
+    for x in live:
+        for h in x["pastes"]:
+            hash_sessions[h] += 1
+    bash_res = sum(x["bash_res"] for x in live)
+    bash_err = sum(x["bash_err"] for x in live)
+
     peaks = sorted(x["peak"] for x in sess) or [0]
     snap.update({
+        "coach_sessions_excluded": len(sess) - len(live),
+        "startup_toll_median": toll[len(toll) // 2] if toll else 0,   # §1.1
+        "failed_cmd_loops": sum(x["loops"] for x in live),            # §1.2
+        "error_density": round(bash_err / bash_res, 3) if bash_res else 0.0,  # §1.6 quality pair
+        "verbose_results_count": len(verbose_all),                    # §1.3
+        "verbose_by_tool": Counter(n for n, _ in verbose_all).most_common(8),
+        "repeat_pastes": sum(1 for c in hash_sessions.values() if c >= 2),    # §1.4
+        "toolsearch_dribble_sessions": sum(1 for x in live if x["ts_single"] >= 3),  # §1.5
         "sessions": len(sess),
         "one_turn": sum(1 for x in sess if x["turns"] <= 1),
         "turns_total": sum(x["turns"] for x in sess),
@@ -264,7 +347,10 @@ def load_prev_snapshots():
 def compute_deltas(snap, prevs):
     keys = ["sessions", "one_turn", "babysit_total", "deferral_total",
             "interrupts", "rereads", "out_tokens", "peak_ctx_median",
-            "sessions_over_150k"]
+            "sessions_over_150k",
+            # SPEC-V2-TRIMMED §1 detectors — tracked as trend lines
+            "startup_toll_median", "failed_cmd_loops", "verbose_results_count",
+            "repeat_pastes", "toolsearch_dribble_sessions"]
     if not prevs:
         return {"note": "first run - no baseline yet",
                 "current": {k: snap[k] for k in keys}}
@@ -486,13 +572,30 @@ def render_report(snap, deltas, inv, analyst, sensor_c, errors, rule_fires, cata
             esc(s.get("why_relevant", "")),
             (" · <a href='%s'>docs</a>" % esc(s["doc_url"])) if s.get("doc_url") else "")
         for s in (spotlight or []))
-    return """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Coach report %s</title>
+    vb = "".join("<li><code>%s</code> ×%s</li>" % (esc(tn), c)
+                 for tn, c in snap.get("verbose_by_tool", []))
+    det = ("""<h2>Deterministic detectors (SPEC-V2-TRIMMED §1)</h2>
+<p>Self-contamination guard (§0): <b>%s</b> coach-dev session(s) excluded from these numbers.</p>
+<ul>
+<li>Startup-toll median — first-turn context on one-turn sessions (input+cache_creation): <b>%s</b> tokens</li>
+<li>Failed-command loops (≥3 same-token errors in a row): <b>%s</b>  ·  bash error density (paired quality number): <b>%s</b></li>
+<li>Verbose tool results (&gt;20k chars): <b>%s</b></li>
+<li>Repeat pastes (same &gt;8k paste in ≥2 sessions): <b>%s</b></li>
+<li>ToolSearch dribble sessions (≥3 single-select calls): <b>%s</b></li>
+</ul>
+<h3>Verbose-result top offenders (by tool)</h3><ul>%s</ul>""" % (
+        snap.get("coach_sessions_excluded", 0), snap.get("startup_toll_median", 0),
+        snap.get("failed_cmd_loops", 0), snap.get("error_density", 0),
+        snap.get("verbose_results_count", 0), snap.get("repeat_pastes", 0),
+        snap.get("toolsearch_dribble_sessions", 0), vb or "<li>none</li>"))
+    body = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Coach report %s</title>
 <style>body{font:15px/1.5 'Segoe UI',sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;color:#222}
 table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 10px}pre{background:#f5f5f5;padding:1rem;
 white-space:pre-wrap}h2{border-bottom:1px solid #ddd}.err{color:#b00}</style></head><body>
 <h1>Live Coach — weekly report %s</h1>%s
 <h2>Nudge fires this week</h2><ul>%s</ul>
 <h2>Deltas (Sensor A)</h2><table><tr><th>metric</th><th>now</th><th>baseline avg</th></tr>%s</table>
+%s
 <h3>New repeated prompts</h3><ul>%s</ul>
 <h2>Owned vs used (Sensor B)</h2>
 <p>Skills owned: %s · invoked this week: %s · Haiku share of messages: %s · Opus/Fable share: %s</p>
@@ -506,13 +609,14 @@ white-space:pre-wrap}h2{border-bottom:1px solid #ddd}.err{color:#b00}</style></h
 <p>Features on surfaces the coach can't see in CLI transcripts (API/claude.ai), picked for this week's work. Rotates; never nags.</p><ul>%s</ul>
 <p><b>Proposals are pending in pending-proposals.json — nothing is auto-applied.</b>
 Approve by telling Claude to move a proposal into rules.json.</p></body></html>""" % (
-        WEEK, WEEK, err, fires or "<li>none</li>", rows, newp or "<li>none</li>",
+        WEEK, WEEK, err, fires or "<li>none</li>", rows, det, newp or "<li>none</li>",
         inv["usage_this_week"]["skills_owned_count"],
         inv["usage_this_week"]["skills_used_count"],
         inv["usage_this_week"]["haiku_share"],
         inv["usage_this_week"]["opus_fable_share"],
         prune or "<li>none</li>", esc(analyst or "(skipped)"), esc(sensor_c or "(skipped)"),
         esc(catalog_note), reps or "<li>none</li>", spot or "<li>none</li>")
+    return body
 
 
 def main():

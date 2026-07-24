@@ -1,8 +1,12 @@
-# SPEC-V2 — Trimmed (draft, for review)
+# SPEC-V2 — Trimmed
 
-Status: **draft — not yet approved, nothing implemented.** Derived from an adversarial
-critic review of `SPEC-V2.md`. This file is a separate proposal; **`SPEC-V2.md` is
-left untouched** as the original record of the full 7-sensor design.
+Status: **§0 + §1 IMPLEMENTED (2026-07-23).** The self-contamination guard (§0) and all
+five deterministic detectors + the quality-guard-as-displayed-number (§1.1–§1.6) are live
+in `coach/coach_weekly.py`, validated `--no-llm` against real transcripts (409 sessions,
+20 coach-dev excluded by §0) and covered by `coach/test_detectors.py`. §2 items remain
+cut/deferred as described. Derived from an adversarial critic review of `SPEC-V2.md`; this
+file is a separate proposal, **`SPEC-V2.md` is left untouched** as the original record of
+the full 7-sensor design.
 
 Critic's one-line verdict: the core principle — pair every cost metric with a quality
 counter-metric — is worth keeping. The apparatus built around it (cohort verdicts,
