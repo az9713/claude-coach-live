@@ -176,5 +176,58 @@ Same shape as the original spec, minus the expensive parts:
    worth reconsidering — not on a schedule, on evidence.
 
 ---
+
+## Appendix A: how the adversarial review was performed
+
+**Agent used:** `code-modernization:architecture-critic`, a subagent type. Not
+native to Claude Code — it ships with the **code-modernization** plugin from the
+`claude-plugins-official` marketplace, installed locally at
+`~/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-modernization/`.
+Its definition is a plain markdown file
+(`agents/architecture-critic.md`) with YAML frontmatter declaring:
+- `tools: Read, Glob, Grep, Bash` — **read-only by design**, no Edit/Write access at
+  all, so it's structurally incapable of modifying the spec or the codebase while
+  reviewing them.
+- A system prompt casting it as "a principal engineer reviewing a modernization
+  design," default stance **skeptical**, whose job is to ask "do we actually need
+  this?" — with an explicit review lens for architecture proposals (real domain
+  seams vs. resume-driven design, simplest-design comparison, unstated
+  non-functional requirements, failure-mode tracing) and a separate lens for
+  transformed code.
+- A mandatory **untrusted-content discipline**: it treats everything it reads as
+  data, never instructions — so nothing inside `SPEC-V2.md` or the coach's own code
+  could steer the critic's conclusions, and any instruction-shaped text embedded in
+  reviewed files would itself become a reported finding rather than being obeyed.
+- A mandatory secret-masking rule for any credential/token it might encounter while
+  reading code (not triggered here — nothing in this repo warranted it).
+
+**What it actually did, mechanically, for this review:** it was spawned fresh (no
+memory of this conversation) and briefed with the full project context plus six
+named review angles (over-engineering, statistical soundness, detector feasibility,
+missed requirements, simpler alternatives, internal consistency). Using only its
+Read/Glob/Grep/Bash tools it:
+1. Read `SPEC-V2.md` in full.
+2. Read the real implementation it was being checked against — `coach_weekly.py`,
+   `coach_hook.py`, `coach_sync.py`, `rules.json`, `COACH-MODEL.md` — to ground the
+   review in what the code actually does, not just what the spec claims it does.
+3. Ran read-only Bash queries against this user's **real transcript data** to test
+   specific claims rather than reason about them abstractly — e.g. it counted actual
+   permission-mode usage (6325 `bypassPermissions` vs. 226 `default`) to show the
+   permission-churn detector would fire on nothing, and it grepped a real transcript
+   for `compact` to show the "compaction marker" the spec assumed doesn't reliably
+   exist.
+4. Cross-referenced the spec's own sample-size claims (all-time habit counts) against
+   what a *weekly, per-rule* cohort split would actually leave to work with, which is
+   where the small-N / ring-buffer findings in §2.1 came from.
+5. Returned findings as plain-text analysis (its `Read`/`Glob`/`Grep`/`Bash`-only
+   tool access means it could not have written this file itself — the orchestrating
+   session, i.e. this one, is what turned its findings into `SPEC-V2-TRIMMED.md`).
+
+Every specific number and file:line reference in this trimmed spec (the
+`coach_hook.py` ring-buffer cap, the 6325/226 permission-mode split, the self-
+contamination mechanism in §0) is something the critic verified against live code or
+live transcript data during that process — not inferred from the spec text alone.
+
+---
 *Draft derived from adversarial review of SPEC-V2.md, 2026-07-23. Proposes, does not
 implement. SPEC-V2.md is unmodified and remains the full original design record.*
